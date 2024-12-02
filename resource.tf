@@ -1,3 +1,34 @@
+
+# Data block to fetch the default VPC
+data "aws_vpc" "default" {
+  default = true
+}
+
+# Data block to fetch subnets of the default VPC
+data "aws_subnets" "default" {
+  filter {
+    name   = "vpc-id"
+    values = [data.aws_vpc.default.id]
+  }
+}
+
+# Data block to fetch the latest Amazon EKS-optimized AMI
+data "aws_ami" "eks_optimized" {
+  most_recent = true
+
+  filter {
+    name   = "name"
+    values = ["amazon-eks-node-${var.k8s_version}*"]
+  }
+
+  filter {
+    name   = "architecture"
+    values = ["x86_64"]
+  }
+
+  owners = ["982534394067"] # Amazon EKS AMI owner ID
+}
+
 # EKS Cluster
 resource "aws_eks_cluster" "eks" {
   name     = var.cluster_name
@@ -15,7 +46,6 @@ resource "aws_eks_node_group" "node_group" {
   node_group_name = "${var.cluster_name}-node-group"
   node_role_arn   = aws_iam_role.eks_node_role.arn
   subnet_ids      = data.aws_subnets.default.ids
-  
 
   scaling_config {
     desired_size = var.node_count
@@ -23,12 +53,10 @@ resource "aws_eks_node_group" "node_group" {
     min_size     = 1
   }
 
-  
+  instance_types = [var.node_instance_type]
 
   launch_template {
     id = aws_launch_template.eks_nodes.id
-    version = "$Latest"
-    #instance_types = [var.node_instance_type]
   }
 }
 
@@ -48,58 +76,46 @@ resource "aws_launch_template" "eks_nodes" {
 
 # IAM Role for EKS Cluster
 resource "aws_iam_role" "eks_cluster_role" {
-  name = "eks-cluster-role"
+  name = "${var.cluster_name}-eks-cluster-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
-        Action    = "sts:AssumeRole"
+        Effect = "Allow"
         Principal = {
           Service = "eks.amazonaws.com"
         }
-        Effect    = "Allow"
-        Sid       = ""
+        Action = "sts:AssumeRole"
       }
     ]
   })
-}
 
-resource "aws_iam_role_policy_attachment" "eks_cluster_policy_attachment" {
-  role       = aws_iam_role.eks_cluster_role.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
+  managed_policy_arns = [
+    "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
+  ]
 }
 
 # IAM Role for EKS Nodes
 resource "aws_iam_role" "eks_node_role" {
-  name = "eks-node-role"
+  name = "${var.cluster_name}-eks-node-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
-        Action    = "sts:AssumeRole"
+        Effect = "Allow"
         Principal = {
           Service = "ec2.amazonaws.com"
         }
-        Effect    = "Allow"
-        Sid       = ""
+        Action = "sts:AssumeRole"
       }
     ]
   })
-}
 
-resource "aws_iam_role_policy_attachment" "eks_worker_node_policy_attachment" {
-  role       = aws_iam_role.eks_node_role.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
-}
-
-resource "aws_iam_role_policy_attachment" "ecr_read_only_policy_attachment" {
-  role       = aws_iam_role.eks_node_role.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
-}
-
-resource "aws_iam_role_policy_attachment" "eks_cni_policy_attachment" {
-  role       = aws_iam_role.eks_node_role.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
+  managed_policy_arns = [
+    "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy",
+    "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly",
+    "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
+  ]
 }
